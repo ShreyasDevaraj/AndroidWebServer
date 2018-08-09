@@ -7,13 +7,34 @@ import android.os.IBinder;
 import android.support.annotation.Nullable;
 import android.util.Log;
 
+import com.android.volley.Request;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.StringRequest;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
+
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.Socket;
+import java.net.UnknownHostException;
 import java.security.KeyStore;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipFile;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -29,6 +50,7 @@ import fi.iki.elonen.NanoHTTPD;
 public class HttpsService extends Service {
     private MyHTTPD server;
     private static final int PORT = 8765;
+    private static String url = "http://10.10.100.149:4980";
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -49,7 +71,12 @@ public class HttpsService extends Service {
         } catch (IOException e) {
             Log.e("TAG", "exception " + e);
         }
+
+
+
+
     }
+
 
     @Override
     public void onDestroy() {
@@ -88,28 +115,24 @@ public class HttpsService extends Service {
 }
 
  class MyHTTPD extends NanoHTTPD {
-
+     public Socket socket = null;
 
     public MyHTTPD(int port) {
         super(port);
+
     }
 
     @Override
     public Response serve(IHTTPSession session) {
         Log.e("TAG", session.getUri());
-
         final StringBuilder buf = new StringBuilder();
         for (Map.Entry<String, String> kv : session.getHeaders().entrySet()) {
             buf.append(kv.getKey() + " : " + kv.getValue() + "\n");
         }
 
         Log.e("TAG", buf.toString());
-      /*  handler.post(new Runnable() {
-            @Override
-            public void run() {
-               // hello.setText(buf);
-            }
-        });*/
+
+
 
         switch (session.getUri()) {
 
@@ -120,12 +143,96 @@ public class HttpsService extends Service {
                 r.addHeader("Location", "http://10.10.100.149:4980");
                 return r;
             default:
-                final String html = "<html><head><head><body><h1>Hello, Shreyas how are you??</h1></body></html>";
-                InputStream targetStream = new ByteArrayInputStream(html.getBytes());
-                return NanoHTTPD.newFixedLengthResponse(Response.Status.OK, MIME_HTML, targetStream, html.getBytes().length);
+
+                String url = "http://10.10.100.149:4980/" +session.getUri();
+               String html;
+                try {
+                    final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(2);
+                    ListenableFuture<String> future = Futures.withTimeout(makeContentUpdateRestCall(url), 10, TimeUnit.SECONDS, executorService);
+                    html = future.get();
+                    InputStream targetStream = new ByteArrayInputStream(html.getBytes());
+                    //return NanoHTTPD.newFixedLengthResponse(Response.Status.OK, MIME_HTML, targetStream, html.getBytes().length);
+                    return NanoHTTPD.newChunkedResponse(Response.Status.OK, MIME_HTML, targetStream);
+                } catch (ExecutionException e) {
+                    e.printStackTrace();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                return null;
 
 
         }
     }
+
+     private ListenableFuture<String> makeContentUpdateRestCall(final String url) {
+         final SettableFuture<String> future = SettableFuture.create();
+         final ExecutorService executorService = Executors.newSingleThreadExecutor();
+         executorService.submit(new Runnable() {
+             @Override
+             public void run() {
+
+                 StringRequest sr = new StringRequest(Request.Method.GET, url, new com.android.volley.Response.Listener<String>() {
+                     @Override
+                     public void onResponse(String response) {
+
+                          future.set(response);
+
+                     }
+                 }, new com.android.volley.Response.ErrorListener() {
+                     @Override
+                     public void onErrorResponse(VolleyError error) {
+                        future.set(null);
+                     }
+                 });
+                 WebServerApplication.getInstance().getRequestQueue().add(sr);
+             }
+         });
+         return future;
+     }
+    public String makeRestCall() throws ExecutionException, InterruptedException {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Callable<String> callable = new Callable<String>() {
+            @Override
+            public String call() throws InterruptedException {
+                final String[] responseHandler = {null};
+                StringRequest sr = new StringRequest(Request.Method.GET, "http://10.10.100.149:4980", new com.android.volley.Response.Listener<String>() {
+                    @Override
+                    public void onResponse(String response) {
+
+                        responseHandler[0] = response;
+
+                    }
+                }, new com.android.volley.Response.ErrorListener() {
+                    @Override
+                    public void onErrorResponse(VolleyError error) {
+
+                    }
+                });
+                WebServerApplication.getInstance().getRequestQueue().add(sr);
+              return responseHandler[0];
+            }
+        };
+        Future<String> future = executor.submit(callable);
+        // future.get() returns 2 or raises an exception if the thread dies, so safer
+        executor.shutdown();
+        return future.get();
+    }
+
+     /**
+      * StringRequest sr = new StringRequest(Request.Method.GET, "http://10.10.100.149:4980", new Response.Listener<String>() {
+     @Override
+     public void onResponse(String response) {
+     //StratacacheLog.e(TAG, response);
+     Log.e("TAG", response);
+     }
+     }, new Response.ErrorListener() {
+     @Override
+     public void onErrorResponse(VolleyError error) {
+     Log.e("TAG", "Error " + error.toString());
+     }
+     });
+      mRequestQueue.add(sr);
+      */
+
 
 }
