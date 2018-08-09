@@ -21,8 +21,8 @@ public class WebServerApplication extends Application {
     public void onCreate() {
         super.onCreate();
         instance = this;
-         mRequestQueue = Volley.newRequestQueue(this);
-         Log.e("TAG", getLocalIpAddress());
+        mRequestQueue = Volley.newRequestQueue(this);
+        Log.e("TAG", getLocalIpAddress());
     }
 
     public String getLocalIpAddress()

@@ -5,15 +5,21 @@ import android.content.Intent;
 import android.os.Environment;
 import android.os.IBinder;
 import android.support.annotation.Nullable;
+import android.util.Base64;
 import android.util.Log;
 
+import com.android.volley.AuthFailureError;
 import com.android.volley.Request;
+import com.android.volley.RequestQueue;
 import com.android.volley.Response;
 import com.android.volley.VolleyError;
+import com.android.volley.toolbox.JsonObjectRequest;
 import com.android.volley.toolbox.StringRequest;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
+
+import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -26,6 +32,7 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.security.KeyStore;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -50,7 +57,7 @@ import fi.iki.elonen.NanoHTTPD;
 public class HttpsService extends Service {
     private MyHTTPD server;
     private static final int PORT = 8765;
-    private static String url = "http://10.10.100.149:4980";
+    private static String url = "http://10.10.100.38:4980";
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -140,11 +147,11 @@ public class HttpsService extends Service {
             case "/test":
 
                 Response r = newFixedLengthResponse(Response.Status.REDIRECT, MIME_HTML, "");
-                r.addHeader("Location", "http://10.10.100.149:4980");
+                r.addHeader("Location", "http://10.10.100.38:4980");
                 return r;
             default:
 
-                String url = "http://10.10.100.149:4980/" +session.getUri();
+                String url = "http://10.10.100.38:4980/" +session.getUri();
                String html;
                 try {
                     final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(2);
@@ -183,10 +190,20 @@ public class HttpsService extends Service {
                      public void onErrorResponse(VolleyError error) {
                         future.set(null);
                      }
-                 });
+                 }){
+                     @Override
+                     public Map<String, String> getHeaders() throws AuthFailureError {
+                         HashMap<String, String> params = new HashMap<String, String>();
+                         String creds = String.format("%s:%s","admin","P4Ns!nAg3");
+                         String auth = "Basic " + Base64.encodeToString(creds.getBytes(), Base64.DEFAULT);
+                         params.put("Authorization", auth);
+                         return params;
+                     }
+                 };
                  WebServerApplication.getInstance().getRequestQueue().add(sr);
              }
          });
+
          return future;
      }
     public String makeRestCall() throws ExecutionException, InterruptedException {
@@ -195,7 +212,7 @@ public class HttpsService extends Service {
             @Override
             public String call() throws InterruptedException {
                 final String[] responseHandler = {null};
-                StringRequest sr = new StringRequest(Request.Method.GET, "http://10.10.100.149:4980", new com.android.volley.Response.Listener<String>() {
+                StringRequest sr = new StringRequest(Request.Method.GET, "http://10.10.100.38:4980", new com.android.volley.Response.Listener<String>() {
                     @Override
                     public void onResponse(String response) {
 
