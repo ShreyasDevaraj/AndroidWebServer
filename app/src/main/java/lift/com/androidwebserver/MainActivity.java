@@ -31,11 +31,9 @@ public class MainActivity extends AppCompatActivity {
         infoIp = (TextView) findViewById(R.id.infoip);
         infoMsg = (TextView) findViewById(R.id.msg);
 
-        infoIp.setText(getIpAddress() + ":"
-                + HttpServerThread.HttpServerPORT + "\n");
-
-        HttpServerThread httpServerThread = new HttpServerThread();
-        httpServerThread.start();
+        Intent intent = new Intent(this, HttpsService.class);
+        startService(intent);
+        Log.e("TAG", "Starting service after activity launch ");
     }
 
     @Override
