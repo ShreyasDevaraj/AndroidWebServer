@@ -4,7 +4,7 @@ android {
     compileSdkVersion 26
     defaultConfig {
         applicationId "lift.com.androidwebserver"
-        minSdkVersion 15
+        minSdkVersion 19
         targetSdkVersion 26
         versionCode 1
         versionName "1.0"
@@ -19,6 +19,11 @@ android {
     configurations.all {
         resolutionStrategy.force 'com.google.code.findbugs:jsr305:1.3.9'
     }
+    packagingOptions {
+        exclude 'mozilla/public-suffix-list.txt'
+        exclude 'org/apache/http/client/version.properties'
+        exclude 'META-INF/DEPENDENCIES'
+    }
 }
 
 dependencies {
@@ -28,10 +33,11 @@ dependencies {
     testImplementation 'junit:junit:4.12'
     androidTestImplementation 'com.android.support.test:runner:1.0.2'
     androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'
-    compile 'com.nanohttpd:nanohttpd-webserver:2.2.0'
+    compile 'org.nanohttpd:nanohttpd:2.3.1'
+    compile group: 'commons-fileupload', name: 'commons-fileupload', version: '1.3.1'
     compile 'com.android.support:support-annotations:27.1.1'
     androidTestCompile 'com.google.code.findbugs:jsr305:1.3.9'
-    compile 'commons-io:commons-io:2.6'
-    compile 'com.android.volley:volley:1.0.0'
     compile 'com.google.guava:guava:23.3-android'
+    compile group: 'commons-httpclient', name: 'commons-httpclient', version: '3.1'
+
 }

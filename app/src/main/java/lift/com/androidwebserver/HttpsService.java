@@ -2,46 +2,43 @@ package lift.com.androidwebserver;
 
 import android.app.Service;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Environment;
 import android.os.IBinder;
 import android.support.annotation.Nullable;
-import android.util.Base64;
 import android.util.Log;
 
-import com.android.volley.AuthFailureError;
-import com.android.volley.Request;
-import com.android.volley.RequestQueue;
-import com.android.volley.Response;
-import com.android.volley.VolleyError;
-import com.android.volley.toolbox.JsonObjectRequest;
-import com.android.volley.toolbox.StringRequest;
+
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
-
-import org.json.JSONObject;
-
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
+import org.apache.commons.httpclient.methods.GetMethod;
+import org.apache.commons.io.IOUtils;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
+
 import java.io.OutputStream;
-import java.net.Socket;
-import java.net.UnknownHostException;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLConnection;
 import java.security.KeyStore;
+
 import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
+
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
+
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.zip.ZipFile;
+
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -50,6 +47,8 @@ import javax.net.ssl.TrustManagerFactory;
 
 import fi.iki.elonen.NanoHTTPD;
 
+import static lift.com.androidwebserver.HttpsService.MIME;
+
 /**
  * Created by sdevaraj on 6/1/2018.
  */
@@ -57,7 +56,9 @@ import fi.iki.elonen.NanoHTTPD;
 public class HttpsService extends Service {
     private MyHTTPD server;
     private static final int PORT = 8765;
-    private static String url = "http://10.10.100.38:4980";
+    List<String> mimeType = new LinkedList<>();
+    public static String MIME = null;
+
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -69,18 +70,13 @@ public class HttpsService extends Service {
         server = new MyHTTPD(PORT);
         String path = Environment.getExternalStorageDirectory().getAbsolutePath() + "/Download/keystore.bks";
         try {
-
             File keystoreFile = new File(path);
             SSLServerSocketFactory mySSLSocketFactory = makeSSLSocketFactory(keystoreFile, "shreyas".toCharArray());
-
             server.makeSecure(mySSLSocketFactory, null);
             server.start();
         } catch (IOException e) {
             Log.e("TAG", "exception " + e);
         }
-
-
-
 
     }
 
@@ -122,134 +118,148 @@ public class HttpsService extends Service {
 }
 
  class MyHTTPD extends NanoHTTPD {
-     public Socket socket = null;
 
     public MyHTTPD(int port) {
         super(port);
-
     }
 
     @Override
     public Response serve(IHTTPSession session) {
-        Log.e("TAG", session.getUri());
-        final StringBuilder buf = new StringBuilder();
-        for (Map.Entry<String, String> kv : session.getHeaders().entrySet()) {
-            buf.append(kv.getKey() + " : " + kv.getValue() + "\n");
+        Method method = session.getMethod();
+        Map<String, String> files = new HashMap<>();
+
+        if (Method.PUT.equals(method) || Method.POST.equals(method)) {
+            try {
+                session.parseBody(files);
+
+            } catch (IOException ioe) {
+                return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, NanoHTTPD.MIME_PLAINTEXT, "SERVER INTERNAL ERROR: IOException: " + ioe.getMessage());
+            } catch (ResponseException re) {
+                return newFixedLengthResponse(re.getStatus(), NanoHTTPD.MIME_PLAINTEXT, re.getMessage());
+            }
         }
 
-        Log.e("TAG", buf.toString());
-
-
-
-        switch (session.getUri()) {
-
-            //http://10.10.100.149:4980/
+            Map<String, String> currentHeader = session.getHeaders();
+            switch (session.getUri()) {
             case "/test":
 
                 Response r = newFixedLengthResponse(Response.Status.REDIRECT, MIME_HTML, "");
-                r.addHeader("Location", "http://10.10.100.38:4980");
+                r.addHeader("Location", "http://127.0.0.1:4980");
                 return r;
             default:
 
-                String url = "http://10.10.100.38:4980/" +session.getUri();
-               String html;
+                String url;
+                Uri.Builder buildUri =  Uri.parse("http://127.0.0.1:4980").buildUpon().appendEncodedPath(session.getUri());
+                Map<String, String> parameterMap = session.getParms();
+                if(parameterMap != null && !parameterMap.isEmpty() && session.getMethod().equals(Method.GET)){
+                    for(String key : parameterMap.keySet()){
+                        buildUri.appendQueryParameter(key, parameterMap.get(key));
+                    }
+                }
+
                 try {
+
+                    Uri uri1 = buildUri.build();
+                    url = uri1.toString();
                     final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(2);
-                    ListenableFuture<String> future = Futures.withTimeout(makeContentUpdateRestCall(url), 10, TimeUnit.SECONDS, executorService);
-                    html = future.get();
-                    InputStream targetStream = new ByteArrayInputStream(html.getBytes());
-                    //return NanoHTTPD.newFixedLengthResponse(Response.Status.OK, MIME_HTML, targetStream, html.getBytes().length);
-                    return NanoHTTPD.newChunkedResponse(Response.Status.OK, MIME_HTML, targetStream);
+
+                    ListenableFuture<InputStream> futureInputStream = Futures.withTimeout(makeContentUpdateRestCallNew(url, currentHeader, session.getMethod(), files, parameterMap), 10, TimeUnit.SECONDS, executorService);
+                    InputStream res = futureInputStream.get();
+                    if(MIME == null){
+                        Response response = NanoHTTPD.newChunkedResponse(Response.Status.OK, MIME_HTML, res);
+                        return response;
+                    }else{
+                        Response response = NanoHTTPD.newChunkedResponse(Response.Status.OK, MIME, res);
+                        return response;
+                    }
+
                 } catch (ExecutionException e) {
                     e.printStackTrace();
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
-                return null;
+                return super.serve(session);
 
 
         }
     }
 
-     private ListenableFuture<String> makeContentUpdateRestCall(final String url) {
-         final SettableFuture<String> future = SettableFuture.create();
-         final ExecutorService executorService = Executors.newSingleThreadExecutor();
-         executorService.submit(new Runnable() {
-             @Override
-             public void run() {
+    private ListenableFuture<InputStream> makeContentUpdateRestCallNew(final String Url, final Map<String, String> currentHeader, Method method, Map<String, String> files, Map<String, String> parameterMap){
+        final SettableFuture<InputStream> future = SettableFuture.create();
+        org.apache.commons.httpclient.HttpClient hc = new org.apache.commons.httpclient.HttpClient();
+                if(method.equals(Method.GET)) {
+                    GetMethod get = new GetMethod(Url);
+                    for (String key : currentHeader.keySet()) {
+                        get.setRequestHeader(key, currentHeader.get(key));
+                    }
+                    int code = 0;
+                    try {
+                        code = hc.executeMethod(get);
+                        if (code == 200 || code == 401) {
+                            MIME = get.getResponseHeader("Content-Type").getValue();
+                            future.set(get.getResponseBodyAsStream());
+                        } else {
+                            future.set(null);
+                        }
 
-                 StringRequest sr = new StringRequest(Request.Method.GET, url, new com.android.volley.Response.Listener<String>() {
-                     @Override
-                     public void onResponse(String response) {
-
-                          future.set(response);
-
-                     }
-                 }, new com.android.volley.Response.ErrorListener() {
-                     @Override
-                     public void onErrorResponse(VolleyError error) {
+                    } catch (IOException e) {
                         future.set(null);
-                     }
-                 }){
-                     @Override
-                     public Map<String, String> getHeaders() throws AuthFailureError {
-                         HashMap<String, String> params = new HashMap<String, String>();
-                         String creds = String.format("%s:%s","admin","P4Ns!nAg3");
-                         String auth = "Basic " + Base64.encodeToString(creds.getBytes(), Base64.DEFAULT);
-                         params.put("Authorization", auth);
-                         return params;
-                     }
-                 };
-                 WebServerApplication.getInstance().getRequestQueue().add(sr);
-             }
-         });
-
-         return future;
-     }
-    public String makeRestCall() throws ExecutionException, InterruptedException {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        Callable<String> callable = new Callable<String>() {
-            @Override
-            public String call() throws InterruptedException {
-                final String[] responseHandler = {null};
-                StringRequest sr = new StringRequest(Request.Method.GET, "http://10.10.100.38:4980", new com.android.volley.Response.Listener<String>() {
-                    @Override
-                    public void onResponse(String response) {
-
-                        responseHandler[0] = response;
-
+                        e.printStackTrace();
                     }
-                }, new com.android.volley.Response.ErrorListener() {
-                    @Override
-                    public void onErrorResponse(VolleyError error) {
+                }else if(method.equals(Method.POST)){
+                    if(!files.isEmpty()) {
+                        String originalFileName = parameterMap.get("upfile1");
+                        String filename = files.get("upfile1");
+                        filename = filename.substring(filename.lastIndexOf("/") + 1);
+                        File cDir = WebServerApplication.getInstance().getApplicationContext().getCacheDir();
+                        File tempFile = new File(cDir.getPath() + "/" + filename);
 
+                        try {
+                            String charset = "UTF-8";
+                            String param = "value";
+                            String boundary = Long.toHexString(System.currentTimeMillis()); // Just generate some unique random value.
+                            String CRLF = "\r\n"; // Line separator required by multipart/form-data.
+
+                            URLConnection connection = new URL(Url).openConnection();
+                            connection.setDoOutput(true);
+                            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+
+                            try (
+                                    OutputStream output = connection.getOutputStream();
+                                    PrintWriter writer = new PrintWriter(new OutputStreamWriter(output, charset), true);
+                            ) {
+
+                                // Send text file.
+                                writer.append("--" + boundary).append(CRLF);
+                                writer.append("Content-Disposition: form-data; name=\"file\"; filename=\"" +originalFileName + "\"").append(CRLF);
+                                writer.append("Content-Type: text/plain; charset=" + charset).append(CRLF); // Text file itself must be saved in this charset!
+                                writer.append(CRLF).flush();
+                                IOUtils.copy(new FileInputStream(tempFile),output);
+                                output.flush();
+                                writer.append(CRLF).flush();
+                                writer.append("--" + boundary + "--").append(CRLF).flush();
+                            }
+
+                            // Request is lazily fired whenever you need to obtain information about response.
+                            int responseCode = ((HttpURLConnection) connection).getResponseCode();
+
+                            if (responseCode == 200) {
+                                MIME = ((HttpURLConnection) connection).getHeaderField("Content-Type");
+                                Log.e("Response header ", "" + MIME);
+                                future.set(connection.getInputStream());
+                            } else {
+                                future.set(null);
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                         }
                     }
-                });
-                WebServerApplication.getInstance().getRequestQueue().add(sr);
-              return responseHandler[0];
-            }
-        };
-        Future<String> future = executor.submit(callable);
-        // future.get() returns 2 or raises an exception if the thread dies, so safer
-        executor.shutdown();
-        return future.get();
+
+
+                }
+
+        return future;
     }
-
-     /**
-      * StringRequest sr = new StringRequest(Request.Method.GET, "http://10.10.100.149:4980", new Response.Listener<String>() {
-     @Override
-     public void onResponse(String response) {
-     //StratacacheLog.e(TAG, response);
-     Log.e("TAG", response);
-     }
-     }, new Response.ErrorListener() {
-     @Override
-     public void onErrorResponse(VolleyError error) {
-     Log.e("TAG", "Error " + error.toString());
-     }
-     });
-      mRequestQueue.add(sr);
-      */
 
 
 }
